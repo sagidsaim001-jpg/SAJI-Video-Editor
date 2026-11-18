@@ -304,6 +304,8 @@ private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
         }
     }
 
+    val previewPlayer = player
+
     Column(modifier = Modifier.fillMaxSize().background(Ink)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
@@ -337,14 +339,14 @@ private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(Color.Black)
-                .aspectRatio(if (ratio == "9:16") 0.72f else if (ratio == "1:1") 1.15f else 1.78f),
+                .height(220.dp),
             contentAlignment = Alignment.Center
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { viewContext ->
                     PlayerView(viewContext).apply {
-                        player = this@EditorScreen.player
+                        this.player = previewPlayer
                         useController = false
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setShutterBackgroundColor(android.graphics.Color.BLACK)
