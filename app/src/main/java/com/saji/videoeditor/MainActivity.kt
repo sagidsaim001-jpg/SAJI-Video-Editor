@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -73,7 +74,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.audio.SpeedProvider
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -274,6 +278,9 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
     var showRatio by remember { mutableStateOf(false) }
     var showAdjust by remember { mutableStateOf(false) }
     var brightness by remember { mutableFloatStateOf(0f) }
+    var speed by remember { mutableFloatStateOf(1f) }
+    var muteClipAudio by remember { mutableStateOf(false) }
+    var showSpeed by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
 
@@ -357,7 +364,13 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
                 )
             )
         }
+        val speedProvider = object : SpeedProvider {
+            override fun getSpeed(presentationTimeUs: Long): Float = speed
+            override fun getNextSpeedChangeTimeUs(timeUs: Long): Long = C.TIME_UNSET
+        }
         val edited = EditedMediaItem.Builder(clippedItem)
+            .setRemoveAudio(muteClipAudio)
+            .setSpeed(speedProvider)
             .setEffects(Effects(emptyList(), videoEffects))
             .build()
         exporting = true
@@ -537,8 +550,19 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
                 ToolTile("Text", Icons.Default.TextFields) { textDraft = overlayText; showText = true }
                 ToolTile("Canvas", Icons.Default.Crop) { showRatio = true }
                 ToolTile("Music", Icons.Default.MusicNote, onAddMusic)
+                ToolTile("Speed", Icons.Default.Speed) { showSpeed = true }
                 ToolTile("Adjust", Icons.Default.Tune) { showAdjust = true }
                 ToolTile("Replace", Icons.Default.Movie, onReplace)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Original clip audio", color = Muted, fontSize = 10.sp)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { muteClipAudio = !muteClipAudio }) {
+                    Text(if (muteClipAudio) "Muted" else "On", color = if (muteClipAudio) Color(0xFFFF8C8C) else Accent, fontSize = 11.sp)
+                }
             }
             if (musicUri != null) {
                 Spacer(Modifier.height(8.dp))
@@ -586,6 +610,43 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
             },
             dismissButton = {
                 TextButton(onClick = { overlayText = ""; showText = false }) { Text("Remove", color = Muted) }
+            }
+        )
+    }
+
+    if (showSpeed) {
+        AlertDialog(
+            onDismissRequest = { showSpeed = false },
+            containerColor = Panel,
+            title = { Text("Clip speed") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Selected speed: ${speed}x", color = Muted, fontSize = 12.sp)
+                    listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { value ->
+                        OutlinedButton(
+                            onClick = {
+                                speed = value
+                                player.setPlaybackParameters(PlaybackParameters(value))
+                                showSpeed = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, if (speed == value) Accent else Panel2)
+                        ) {
+                            Text("${value}x", color = Color.White)
+                            if (speed == value) {
+                                Spacer(Modifier.width(8.dp))
+                                androidx.compose.material3.Icon(Icons.Default.Check, contentDescription = null, tint = Accent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showSpeed = false }) { Text("Done", color = Accent) } },
+            dismissButton = {
+                TextButton(onClick = {
+                    speed = 1f
+                    player.setPlaybackParameters(PlaybackParameters(1f))
+                }) { Text("Reset 1x", color = Muted) }
             }
         )
     }
