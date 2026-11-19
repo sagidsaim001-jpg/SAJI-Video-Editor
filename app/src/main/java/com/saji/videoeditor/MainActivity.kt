@@ -1,6 +1,7 @@
 package com.saji.videoeditor
 
 import android.net.Uri
+import android.text.SpannableString
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
@@ -34,7 +35,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.Film
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.TextFields
@@ -56,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,7 +77,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.effect.Brightness
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.TextOverlay
+import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
@@ -82,6 +91,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import java.io.File
+import kotlin.math.abs
 
 private val Ink = Color(0xFF080B12)
 private val Panel = Color(0xFF141A26)
@@ -116,8 +126,29 @@ private fun SajiTheme(content: @Composable () -> Unit) {
 @Composable
 private fun SajiEditorApp() {
     var videoUri by remember { mutableStateOf<Uri?>(null) }
+    var musicUri by remember { mutableStateOf<Uri?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) videoUri = uri
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            videoUri = uri
+        }
+    }
+    val musicPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            musicUri = uri
+        }
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
@@ -129,8 +160,11 @@ private fun SajiEditorApp() {
         } else {
             EditorScreen(
                 uri = videoUri!!,
+                musicUri = musicUri,
                 onBack = { videoUri = null },
-                onReplace = { picker.launch(arrayOf("video/*")) }
+                onReplace = { picker.launch(arrayOf("video/*")) },
+                onAddMusic = { musicPicker.launch(arrayOf("audio/*")) },
+                onRemoveMusic = { musicUri = null }
             )
         }
     }
@@ -205,7 +239,7 @@ private fun HomeScreen(onNewProject: () -> Unit, onImport: () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                androidx.compose.material3.Icon(Icons.Default.Film, contentDescription = null, tint = Muted, modifier = Modifier.size(34.dp))
+                androidx.compose.material3.Icon(Icons.Default.Movie, contentDescription = null, tint = Muted, modifier = Modifier.size(34.dp))
                 Text("No projects yet", fontWeight = FontWeight.SemiBold)
                 Text("Import a clip and your edits will begin here.", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
                 OutlinedButton(onClick = onImport, border = BorderStroke(1.dp, Accent.copy(alpha = 0.65f))) {
@@ -218,7 +252,7 @@ private fun HomeScreen(onNewProject: () -> Unit, onImport: () -> Unit) {
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
+private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace: () -> Unit, onAddMusic: () -> Unit, onRemoveMusic: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
@@ -238,8 +272,43 @@ private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
     var textDraft by remember { mutableStateOf("") }
     var ratio by remember { mutableStateOf("16:9") }
     var showRatio by remember { mutableStateOf(false) }
+    var showAdjust by remember { mutableStateOf(false) }
+    var brightness by remember { mutableFloatStateOf(0f) }
     var exporting by remember { mutableStateOf(false) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
+
+    val musicPreviewPlayer = remember(musicUri) {
+        musicUri?.let { selectedMusic ->
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(selectedMusic))
+                repeatMode = Player.REPEAT_MODE_ONE
+                volume = 0.72f
+                prepare()
+                playWhenReady = false
+            }
+        }
+    }
+
+    DisposableEffect(musicPreviewPlayer) {
+        onDispose { musicPreviewPlayer?.release() }
+    }
+
+    LaunchedEffect(musicPreviewPlayer, playing) {
+        val soundtrack = musicPreviewPlayer
+        if (soundtrack != null) {
+            while (true) {
+                if (playing) {
+                    if (abs(soundtrack.currentPosition - player.currentPosition) > 450L) {
+                        soundtrack.seekTo(player.currentPosition)
+                    }
+                    soundtrack.play()
+                } else {
+                    soundtrack.pause()
+                }
+                delay(400)
+            }
+        }
+    }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -279,7 +348,18 @@ private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
                     .setEndPositionMs(trimEnd)
                     .build()
             ).build()
-        val edited = EditedMediaItem.Builder(clippedItem).build()
+        val videoEffects = mutableListOf<androidx.media3.common.Effect>()
+        if (brightness != 0f) videoEffects.add(Brightness(brightness))
+        if (overlayText.isNotBlank()) {
+            videoEffects.add(
+                OverlayEffect(
+                    listOf(TextOverlay.createStaticTextOverlay(SpannableString(overlayText)))
+                )
+            )
+        }
+        val edited = EditedMediaItem.Builder(clippedItem)
+            .setEffects(Effects(emptyList(), videoEffects))
+            .build()
         exporting = true
         exportMessage = null
         val listener = object : Transformer.Listener {
@@ -297,7 +377,21 @@ private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
             }
         }
         try {
-            Transformer.Builder(context).addListener(listener).build().start(edited, out.absolutePath)
+            val transformer = Transformer.Builder(context).addListener(listener).build()
+            if (musicUri != null) {
+                val videoSequence = EditedMediaItemSequence.withAudioAndVideoFrom(listOf(edited))
+                val musicItem = EditedMediaItem.Builder(MediaItem.fromUri(musicUri))
+                    .setRemoveVideo(true)
+                    .build()
+                val musicSequence = EditedMediaItemSequence.withAudioFrom(listOf(musicItem))
+                    .buildUpon()
+                    .setIsLooping(true)
+                    .build()
+                val composition = Composition.Builder(videoSequence, musicSequence).build()
+                transformer.start(composition, out.absolutePath)
+            } else {
+                transformer.start(edited, out.absolutePath)
+            }
         } catch (e: Exception) {
             exporting = false
             exportMessage = "Could not start export: ${e.message}"
@@ -442,14 +536,32 @@ private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
                 ToolTile("Trim", Icons.Default.ContentCut) { showTrim = true }
                 ToolTile("Text", Icons.Default.TextFields) { textDraft = overlayText; showText = true }
                 ToolTile("Canvas", Icons.Default.Crop) { showRatio = true }
-                ToolTile("Adjust", Icons.Default.Tune) {
-                    Toast.makeText(context, "More adjustments are coming in the next build.", Toast.LENGTH_SHORT).show()
+                ToolTile("Music", Icons.Default.MusicNote, onAddMusic)
+                ToolTile("Adjust", Icons.Default.Tune) { showAdjust = true }
+                ToolTile("Replace", Icons.Default.Movie, onReplace)
+            }
+            if (musicUri != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF102A28)).padding(horizontal = 11.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    androidx.compose.material3.Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color(0xFF62D7B5), modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        musicUri.lastPathSegment?.substringAfterLast('/') ?: "Background music",
+                        modifier = Modifier.weight(1f),
+                        color = Color(0xFFBCEDE0),
+                        fontSize = 10.sp,
+                        maxLines = 1
+                    )
+                    TextButton(onClick = onRemoveMusic) { Text("Remove", color = Color(0xFFBCEDE0), fontSize = 10.sp) }
                 }
-                ToolTile("Replace", Icons.Default.Film, onReplace)
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                "Text is a preview overlay in this build. Trim export saves the selected video range.",
+                "Text and brightness are baked into export. Music is mixed as a looping soundtrack.",
                 color = Muted, fontSize = 10.sp, lineHeight = 14.sp
             )
         }
@@ -474,6 +586,31 @@ private fun EditorScreen(uri: Uri, onBack: () -> Unit, onReplace: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { overlayText = ""; showText = false }) { Text("Remove", color = Muted) }
+            }
+        )
+    }
+
+    if (showAdjust) {
+        AlertDialog(
+            onDismissRequest = { showAdjust = false },
+            containerColor = Panel,
+            title = { Text("Brightness") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Brightness  ${(brightness * 100).toInt()}%", color = Muted, fontSize = 12.sp)
+                    Slider(
+                        value = brightness,
+                        onValueChange = { brightness = it },
+                        valueRange = -0.5f..0.5f
+                    )
+                    Text("This adjustment is applied when you export the video.", color = Muted, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAdjust = false }) { Text("Apply", color = Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { brightness = 0f }) { Text("Reset", color = Muted) }
             }
         )
     }
