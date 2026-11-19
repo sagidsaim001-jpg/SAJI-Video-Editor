@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -86,6 +87,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.effect.Brightness
 import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.Presentation
 import androidx.media3.effect.TextOverlay
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
@@ -273,6 +275,7 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
     var position by remember { mutableLongStateOf(0L) }
     var trimStart by remember { mutableLongStateOf(0L) }
     var trimEnd by remember { mutableLongStateOf(0L) }
+    var splitAt by remember { mutableStateOf<Long?>(null) }
     var showTrim by remember { mutableStateOf(false) }
     var showText by remember { mutableStateOf(false) }
     var overlayText by remember { mutableStateOf("") }
@@ -383,11 +386,35 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
             override fun getSpeed(presentationTimeUs: Long): Float = speed
             override fun getNextSpeedChangeTimeUs(timeUs: Long): Long = C.TIME_UNSET
         }
-        val edited = EditedMediaItem.Builder(clippedItem)
-            .setRemoveAudio(muteClipAudio)
-            .setSpeed(speedProvider)
-            .setEffects(Effects(emptyList(), videoEffects))
-            .build()
+        val ratioValue = when (ratio) {
+            "9:16" -> 9f / 16f
+            "1:1" -> 1f
+            else -> 16f / 9f
+        }
+        videoEffects.add(Presentation.createForAspectRatio(ratioValue, Presentation.LAYOUT_SCALE_TO_FIT))
+
+        fun makeSegment(startMs: Long, endMs: Long): EditedMediaItem {
+            val segmentItem = MediaItem.Builder().setUri(uri)
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(startMs)
+                        .setEndPositionMs(endMs)
+                        .build()
+                ).build()
+            return EditedMediaItem.Builder(segmentItem)
+                .setRemoveAudio(muteClipAudio)
+                .setSpeed(speedProvider)
+                .setEffects(Effects(emptyList(), videoEffects))
+                .build()
+        }
+
+        val activeSplit = splitAt?.takeIf { it > trimStart + 500 && it < trimEnd - 500 }
+        val edited = makeSegment(trimStart, trimEnd)
+        val videoParts = if (activeSplit != null) {
+            listOf(makeSegment(trimStart, activeSplit), makeSegment(activeSplit, trimEnd))
+        } else {
+            listOf(edited)
+        }
         exporting = true
         exportMessage = null
         val listener = object : Transformer.Listener {
@@ -407,7 +434,7 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
         try {
             val transformer = Transformer.Builder(context).addListener(listener).build()
             if (musicUri != null) {
-                val videoSequence = EditedMediaItemSequence.withAudioAndVideoFrom(listOf(edited))
+                val videoSequence = EditedMediaItemSequence.withAudioAndVideoFrom(videoParts)
                 val musicItem = EditedMediaItem.Builder(MediaItem.fromUri(musicUri))
                     .setRemoveVideo(true)
                     .build()
@@ -417,6 +444,9 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
                     .build()
                 val composition = Composition.Builder(videoSequence, musicSequence).build()
                 transformer.start(composition, out.absolutePath)
+            } else if (activeSplit != null) {
+                val videoSequence = EditedMediaItemSequence.withAudioAndVideoFrom(videoParts)
+                transformer.start(Composition.Builder(videoSequence).build(), out.absolutePath)
             } else {
                 transformer.start(edited, out.absolutePath)
             }
@@ -461,7 +491,8 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(Color.Black)
-                .height(220.dp),
+                .heightIn(max = 300.dp)
+                .aspectRatio(if (ratio == "9:16") 9f / 16f else if (ratio == "1:1") 1f else 16f / 9f),
             contentAlignment = Alignment.Center
         ) {
             AndroidView(
@@ -530,7 +561,10 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("TIMELINE", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.7.sp)
                 Spacer(Modifier.weight(1f))
-                Text("${formatTime(duration)}  •  1 clip", color = Muted, fontSize = 10.sp)
+                Text(
+                    if (splitAt != null) "2 segments  •  ${formatTime(duration)}" else "1 clip  •  ${formatTime(duration)}",
+                    color = Muted, fontSize = 10.sp
+                )
             }
             Spacer(Modifier.height(8.dp))
             Row(
@@ -549,19 +583,40 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
                     repeat(7) { index ->
                         Box(
                             modifier = Modifier.weight(1f).height(36.dp).clip(RoundedCornerShape(4.dp))
-                                .background(if (index % 2 == 0) Color(0xFF3A465C) else Color(0xFF29364A)),
+                                .background(
+                                if (splitAt != null && index * duration / 7L >= (splitAt ?: Long.MAX_VALUE)) Color(0xFF534B84)
+                                else if (index % 2 == 0) Color(0xFF3A465C) else Color(0xFF29364A)
+                            ),
                             contentAlignment = Alignment.Center
                         ) { Text("▥", color = Color.White.copy(alpha = 0.35f), fontSize = 13.sp) }
                     }
                 }
                 Box(Modifier.width(4.dp).height(44.dp).clip(RoundedCornerShape(3.dp)).background(Color(0xFF52D6B5)))
             }
+            if (splitAt != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Split at ${formatTime(splitAt ?: 0L)}", color = Accent, fontSize = 10.sp)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { splitAt = null }) { Text("Clear split", color = Muted, fontSize = 10.sp) }
+                }
+            }
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                ToolTile("Trim", Icons.Default.ContentCut) { showTrim = true }
+                ToolTile("Trim", Icons.Default.Crop) { showTrim = true }
+                ToolTile("Split", Icons.Default.ContentCut) {
+                    val point = player.currentPosition
+                    if (point > trimStart + 500 && point < trimEnd - 500) {
+                        splitAt = if (splitAt == null) point else null
+                    } else {
+                        Toast.makeText(context, "Playhead ko trim range ke beech rakho.", Toast.LENGTH_SHORT).show()
+                    }
+                }
                 ToolTile("Text", Icons.Default.TextFields) { textDraft = overlayText; showText = true }
                 ToolTile("Canvas", Icons.Default.Crop) { showRatio = true }
                 ToolTile("Music", Icons.Default.MusicNote, onAddMusic)
