@@ -2,6 +2,8 @@ package com.saji.videoeditor
 
 import android.net.Uri
 import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
@@ -69,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -274,6 +277,7 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
     var showText by remember { mutableStateOf(false) }
     var overlayText by remember { mutableStateOf("") }
     var textDraft by remember { mutableStateOf("") }
+    var textColor by remember { mutableStateOf(Color.White) }
     var ratio by remember { mutableStateOf("16:9") }
     var showRatio by remember { mutableStateOf(false) }
     var showAdjust by remember { mutableStateOf(false) }
@@ -360,7 +364,18 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
         if (overlayText.isNotBlank()) {
             videoEffects.add(
                 OverlayEffect(
-                    listOf(TextOverlay.createStaticTextOverlay(SpannableString(overlayText)))
+                    listOf(
+                        TextOverlay.createStaticTextOverlay(
+                            SpannableString(overlayText).apply {
+                                setSpan(
+                                    ForegroundColorSpan(textColor.toArgb()),
+                                    0,
+                                    length,
+                                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                                )
+                            }
+                        )
+                    )
                 )
             )
         }
@@ -465,7 +480,7 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
                 Text(
                     overlayText,
                     modifier = Modifier.align(Alignment.Center).padding(18.dp),
-                    color = Color.White,
+                    color = textColor,
                     fontSize = 25.sp,
                     fontWeight = FontWeight.ExtraBold,
                     textAlign = TextAlign.Center
@@ -604,6 +619,20 @@ private fun EditorScreen(uri: Uri, musicUri: Uri?, onBack: () -> Unit, onReplace
                     placeholder = { Text("Type something...") },
                     singleLine = false
                 )
+                Spacer(Modifier.height(8.dp))
+                Text("Text color", color = Muted, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        "White" to Color.White,
+                        "Yellow" to Color(0xFFFFD54F),
+                        "Cyan" to Color(0xFF67E8F9),
+                        "Pink" to Color(0xFFFF78B7)
+                    ).forEach { (name, color) ->
+                        TextButton(onClick = { textColor = color }) {
+                            Text(name, color = color, fontSize = 11.sp)
+                        }
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = { overlayText = textDraft; showText = false }) { Text("Apply", color = Accent) }
