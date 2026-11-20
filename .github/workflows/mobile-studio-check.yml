@@ -43,3 +43,19 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Vibha-Ramprakash/claude-video-effects.git mobile-studio/claude-video-effects
           python mobile-studio/claude-video-effects/scripts/fx.py --list
+
+      - name: Start Gradio and check web page
+        working-directory: mobile-studio
+        run: |
+          python app.py > /tmp/saji-mobile-studio.log 2>&1 &
+          APP_PID=$!
+          trap 'kill $APP_PID 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 25); do
+            if curl --fail --silent http://127.0.0.1:7860/ > /dev/null; then
+              echo "SAJI Mobile Studio web page responded on port 7860."
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/saji-mobile-studio.log
+          exit 1
