@@ -1,7 +1,12 @@
 {
   "name": "SAJI Mobile Video Effects Studio",
-  "build": { "dockerfile": "../mobile-studio/Dockerfile" },
-  "forwardPorts": [7860],
+  "build": {
+    "dockerfile": "../mobile-studio/Dockerfile",
+    "context": "../mobile-studio"
+  },
+  "forwardPorts": [
+    7860
+  ],
   "portsAttributes": {
     "7860": {
       "label": "SAJI Video Studio",
