@@ -1,0 +1,12 @@
+{
+  "name": "SAJI Mobile Video Effects Studio",
+  "build": { "dockerfile": "../mobile-studio/Dockerfile" },
+  "forwardPorts": [7860],
+  "portsAttributes": {
+    "7860": {
+      "label": "SAJI Video Studio",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postCreateCommand": "python -m pip install --upgrade pip"
+}
