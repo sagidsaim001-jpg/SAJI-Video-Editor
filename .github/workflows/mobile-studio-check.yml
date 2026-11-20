@@ -6,6 +6,7 @@ on:
       - mobile-video-effects-studio
     paths:
       - "mobile-studio/**"
+      - ".devcontainer/**"
       - ".github/workflows/mobile-studio-check.yml"
   workflow_dispatch:
 
@@ -16,6 +17,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Build Codespaces container image
+        run: docker build --pull -f mobile-studio/Dockerfile -t saji-mobile-studio:ci mobile-studio
 
       - name: Set up Python
         uses: actions/setup-python@v5
