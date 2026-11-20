@@ -1,0 +1,45 @@
+name: Mobile Studio Smoke Test
+
+on:
+  push:
+    branches:
+      - mobile-video-effects-studio
+    paths:
+      - "mobile-studio/**"
+      - ".github/workflows/mobile-studio-check.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: mobile-studio/requirements.txt
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg git libgl1 libglib2.0-0
+
+      - name: Install Python requirements
+        working-directory: mobile-studio
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check app syntax
+        working-directory: mobile-studio
+        run: python -m py_compile app.py
+
+      - name: Check original effects engine
+        run: |
+          git clone --depth 1 https://github.com/Vibha-Ramprakash/claude-video-effects.git mobile-studio/claude-video-effects
+          python mobile-studio/claude-video-effects/scripts/fx.py --list
